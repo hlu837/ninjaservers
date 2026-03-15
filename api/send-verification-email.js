@@ -1,5 +1,3 @@
-import nodemailer from 'nodemailer';
-
 // In-memory storage for verification codes (in production, use a database)
 const verificationCodes = new Map();
 
@@ -33,42 +31,42 @@ export default async function handler(req, res) {
   });
 
   try {
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailPass = process.env.GMAIL_APP_PASSWORD;
+    const resendApiKey = process.env.RESEND_API_KEY;
 
-    if (!gmailUser || !gmailPass) {
-      const missing = [];
-      if (!gmailUser) missing.push('GMAIL_USER');
-      if (!gmailPass) missing.push('GMAIL_APP_PASSWORD');
-      console.error('Missing environment variables:', missing.join(', '));
-      return res.status(500).json({ error: `Missing env vars: ${missing.join(', ')}` });
+    if (!resendApiKey) {
+      console.error('Missing environment variable: RESEND_API_KEY');
+      return res.status(500).json({ error: 'Server configuration error' });
     }
 
-    // Create transporter with Gmail
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: gmailUser,
-        pass: gmailPass
-      }
+    // Use Resend API instead of SMTP
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'NinjaServers <onboarding@resend.dev>', // Use your verified domain later
+        to: [email],
+        subject: 'Your NinjaServers Verification Code',
+        html: `<p>Your verification code is: <strong>${code}</strong></p><p>It expires in 10 minutes.</p>`,
+        text: `Your verification code is: ${code}. It expires in 10 minutes.`,
+      }),
     });
 
-    // Send verification email
-    await transporter.sendMail({
-      from: `NinjaServers <${gmailUser}>`,
-      to: email,
-      subject: 'Email Verification Code',
-      text: `Your verification code is: ${code}. It expires in 10 minutes.`
-    });
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Resend API error: ${response.status} ${errorData}`);
+    }
 
-    res.status(200).json({ message: 'Verification email sent successfully' });
+    res.json({ message: 'Verification email sent' });
   } catch (error) {
-    console.error('Email sending error:', (error && error.message) || error);
-    try {
-      console.error('Full error:', JSON.stringify(error, Object.getOwnPropertyNames(error)));
-    } catch (e) {
-      console.error('Could not stringify error:', e);
-    }
-    res.status(500).json({ error: (error && error.message) || 'Failed to send email' });
+    console.error('Email sending error:', error);
+    // Return the underlying error message + stack for debugging (safe for dev; remove in production)
+    res.status(500).json({
+      error: 'Failed to send email',
+      detail: error?.message || String(error),
+      stack: error?.stack
+    });
   }
 }
