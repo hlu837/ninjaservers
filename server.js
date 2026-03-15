@@ -8,23 +8,30 @@ const PORT = process.env.PORT || 3000;
 // In-memory storage for verification codes (in production, use a database)
 const verificationCodes = new Map();
 
-const allowedOrigins = [
-  'https://crystal-flow-canvas.lovable.app',
-  // Add any preview/staging domains here, for example:
-  // 'https://crystal-flow-canvas-xxxx.lovable.app',
-];
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'https://crystal-flow-canvas.lovable.app,https://lovable.app')
+  .split(',')
+  .map(o => o.trim())
+  .filter(Boolean);
 
 const corsOptions = {
   origin: (origin, callback) => {
     // Allow requests with no origin (e.g., curl, Postman)
-    if (!origin) return callback(null, true);
-
-    if (allowedOrigins.includes(origin)) {
+    if (!origin) {
+      console.log('CORS: request without origin allowed');
       return callback(null, true);
     }
 
+    // Allow if origin matches the configured allowlist
+    if (allowedOrigins.includes(origin)) {
+      console.log(`CORS: allowing origin ${origin}`);
+      return callback(null, true);
+    }
+
+    console.warn(`CORS: blocking origin ${origin}`);
     callback(new Error(`CORS policy does not allow access from origin ${origin}`));
   },
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
 };
 
 app.use(cors(corsOptions));
@@ -34,6 +41,16 @@ app.use(express.json());
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.url}`, req.body);
   next();
+});
+
+app.get('/api/debug', (req, res) => {
+  res.json({
+    env: {
+      GMAIL_USER: !!process.env.GMAIL_USER,
+      GMAIL_APP_PASSWORD: !!process.env.GMAIL_APP_PASSWORD,
+      PORT: process.env.PORT || null,
+    },
+  });
 });
 
 app.post('/api/send-verification-email', async (req, res) => {
@@ -48,7 +65,7 @@ app.post('/api/send-verification-email', async (req, res) => {
   // Store code with timestamp (expires in 10 minutes)
   verificationCodes.set(email, {
     code,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 
   try {
@@ -60,12 +77,12 @@ app.post('/api/send-verification-email', async (req, res) => {
       return res.status(500).json({ error: 'Server configuration error' });
     }
 
-    const transporter = nodemailer.createTransporter({
+    const transporter = nodemailer.createTransport({
       service: 'gmail',
       auth: {
         user: gmailUser,
-        pass: gmailPass
-      }
+        pass: gmailPass,
+      },
     });
 
     await transporter.sendMail({
@@ -73,13 +90,17 @@ app.post('/api/send-verification-email', async (req, res) => {
       to: email,
       subject: 'Your NinjaServers Verification Code',
       text: `Your verification code is: ${code}. It expires in 10 minutes.`,
-      html: `<p>Your verification code is: <strong>${code}</strong></p><p>It expires in 10 minutes.</p>`
+      html: `<p>Your verification code is: <strong>${code}</strong></p><p>It expires in 10 minutes.</p>`,
     });
 
     res.json({ message: 'Verification email sent' });
   } catch (error) {
     console.error('Email sending error:', error);
-    res.status(500).json({ error: 'Failed to send email' });
+    res.status(500).json({
+      error: 'Failed to send email',
+      detail: error?.message || String(error),
+      stack: error?.stack,
+    });
   }
 });
 
