@@ -46,8 +46,7 @@ app.use((req, res, next) => {
 app.get('/api/debug', (req, res) => {
   res.json({
     env: {
-      GMAIL_USER: !!process.env.GMAIL_USER,
-      GMAIL_APP_PASSWORD: !!process.env.GMAIL_APP_PASSWORD,
+      RESEND_API_KEY: !!process.env.RESEND_API_KEY,
       PORT: process.env.PORT || null,
     },
   });
@@ -69,29 +68,33 @@ app.post('/api/send-verification-email', async (req, res) => {
   });
 
   try {
-    const gmailUser = process.env.GMAIL_USER;
-    const gmailPass = process.env.GMAIL_APP_PASSWORD;
+    const resendApiKey = process.env.RESEND_API_KEY;
 
-    if (!gmailUser || !gmailPass) {
-      console.error('Missing environment variables: GMAIL_USER or GMAIL_APP_PASSWORD');
+    if (!resendApiKey) {
+      console.error('Missing environment variable: RESEND_API_KEY');
       return res.status(500).json({ error: 'Server configuration error' });
     }
 
-    const transporter = nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        user: gmailUser,
-        pass: gmailPass,
+    // Use Resend API instead of SMTP
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${resendApiKey}`,
+        'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        from: 'NinjaServers <onboarding@resend.dev>', // Use your verified domain later
+        to: [email],
+        subject: 'Your NinjaServers Verification Code',
+        html: `<p>Your verification code is: <strong>${code}</strong></p><p>It expires in 10 minutes.</p>`,
+        text: `Your verification code is: ${code}. It expires in 10 minutes.`,
+      }),
     });
 
-    await transporter.sendMail({
-      from: gmailUser,
-      to: email,
-      subject: 'Your NinjaServers Verification Code',
-      text: `Your verification code is: ${code}. It expires in 10 minutes.`,
-      html: `<p>Your verification code is: <strong>${code}</strong></p><p>It expires in 10 minutes.</p>`,
-    });
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Resend API error: ${response.status} ${errorData}`);
+    }
 
     res.json({ message: 'Verification email sent' });
   } catch (error) {
