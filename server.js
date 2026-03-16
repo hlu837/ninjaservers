@@ -1,5 +1,7 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,14 +22,31 @@ const corsOptions = {
       return callback(null, true);
     }
 
-    // Allow if origin matches the configured allowlist
-    if (allowedOrigins.includes(origin)) {
+    const isAllowedOrigin = () => {
+      // Allow exact matches from the configured allowlist
+      if (allowedOrigins.includes(origin)) return true;
+
+      // Allow any subdomain of lovable.app (e.g. preview domains)
+      // Matches: https://lovable.app, https://foo.lovable.app, https://sub.foo.lovable.app
+      if (typeof origin === 'string') {
+        const lovablePattern = /^https:\/\/([a-z0-9-]+\.)*lovable\.app(:\d+)?$/i;
+        if (lovablePattern.test(origin)) return true;
+      }
+
+      return false;
+    };
+
+    const allowed = isAllowedOrigin();
+    console.log(`CORS: origin=${origin} allowed=${allowed}`);
+
+    if (allowed) {
       console.log(`CORS: allowing origin ${origin}`);
       return callback(null, true);
     }
 
     console.warn(`CORS: blocking origin ${origin}`);
-    callback(new Error(`CORS policy does not allow access from origin ${origin}`));
+    // Do not send CORS headers for disallowed origins.
+    return callback(null, false);
   },
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
@@ -51,7 +70,7 @@ app.get('/', (req, res) => {
 app.get('/api/debug', (req, res) => {
   res.json({
     env: {
-      RESEND_API_KEY: !!process.env.RESEND_API_KEY,
+      BREVO_API_KEY: !!process.env.BREVO_API_KEY,
       PORT: process.env.PORT || null,
     },
   });
@@ -73,32 +92,32 @@ app.post('/api/send-verification-email', async (req, res) => {
   });
 
   try {
-    const resendApiKey = process.env.RESEND_API_KEY;
+    const brevoApiKey = process.env.BREVO_API_KEY;
 
-    if (!resendApiKey) {
-      console.error('Missing environment variable: RESEND_API_KEY');
+    if (!brevoApiKey) {
+      console.error('Missing environment variable: BREVO_API_KEY');
       return res.status(500).json({ error: 'Server configuration error' });
     }
 
-    // Use Resend API instead of SMTP
-    const response = await fetch('https://api.resend.com/emails', {
+    // Use Brevo API
+    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${resendApiKey}`,
+        'api-key': brevoApiKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'NinjaServers <onboarding@resend.dev>', // Use your verified domain later
-        to: [email],
+        sender: { email: 'hilinayared438@gmail.com' },
+        to: [{ email }],
         subject: 'Your NinjaServers Verification Code',
-        html: `<p>Your verification code is: <strong>${code}</strong></p><p>It expires in 10 minutes.</p>`,
-        text: `Your verification code is: ${code}. It expires in 10 minutes.`,
+        htmlContent: `<p>Your verification code is: <strong>${code}</strong></p><p>It expires in 10 minutes.</p>`,
+        textContent: `Your verification code is: ${code}. It expires in 10 minutes.`,
       }),
     });
 
     if (!response.ok) {
       const errorData = await response.text();
-      throw new Error(`Resend API error: ${response.status} ${errorData}`);
+      throw new Error(`Brevo API error: ${response.status} ${errorData}`);
     }
 
     res.json({ message: 'Verification email sent' });
@@ -140,7 +159,11 @@ app.post('/api/verify-email', (req, res) => {
 
 // On Vercel, the server is run as a serverless function and should not call listen().
 // When running locally (node server.js), start the server normally.
-if (import.meta.url === `file://${process.argv[1]}`) {
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// If this file was executed directly (node server.js), start the listener.
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
   });
