@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { createHmac } from 'crypto';
 import { fileURLToPath } from 'url';
+import { getSecret } from './envSecrets.js';
 import { upsertVerificationCode, getVerificationCode, deleteVerificationCode, upsertProfileIdentity } from './supabaseClient.js';
 
 const app = express();
@@ -183,9 +184,9 @@ app.post('/api/register-id', async (req, res) => {
     return res.status(400).json({ error: 'public_key must be a valid 64-character hex string' });
   }
 
-  const vbmSecret = process.env.VBM_SECRET;
+  const vbmSecret = getSecret('VBM_SECRET');
   if (!vbmSecret) {
-    console.error('Missing environment variable: VBM_SECRET');
+    console.error('Missing VBM_SECRET');
     return res.status(500).json({ error: 'Server configuration error' });
   }
 

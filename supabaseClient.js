@@ -1,14 +1,15 @@
 import { createClient } from '@supabase/supabase-js';
+import { getSecret } from './envSecrets.js';
 
 // Supabase must have a `verification_codes` table with at least:
 //   email text primary key,
-//   code text,
+//   code text not null,
 //   created_at timestamp with time zone default now()
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const supabaseUrl = getSecret('SUPABASE_URL');
+const supabaseServiceRoleKey = getSecret('SUPABASE_SERVICE_ROLE_KEY');
 
 if (!supabaseUrl || !supabaseServiceRoleKey) {
-  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables');
+  throw new Error('Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables or secret files');
 }
 
 export const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
