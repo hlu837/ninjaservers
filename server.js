@@ -7,6 +7,16 @@ import { fileURLToPath } from 'url';
 import { getSecret } from './envSecrets.js';
 import { upsertVerificationCode, getVerificationCode, deleteVerificationCode, upsertProfileIdentity } from './supabaseClient.js';
 
+// Check Supabase configuration on startup
+const supabaseUrl = getSecret('SUPABASE_URL');
+const supabaseServiceRoleKey = getSecret('SUPABASE_SERVICE_ROLE_KEY');
+if (!supabaseUrl || !supabaseServiceRoleKey) {
+  console.error('❌ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables');
+  process.exit(1);
+} else {
+  console.log('✅ Supabase configuration loaded successfully');
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -173,6 +183,9 @@ app.post('/api/verify-email', async (req, res) => {
 });
 
 app.post('/api/register-id', async (req, res) => {
+  console.log('--- START REGISTRATION ---');
+  console.log('Payload:', req.body);
+
   const { email, public_key } = req.body;
   if (!email || !public_key) {
     return res.status(400).json({ error: 'Email and public_key are required' });
@@ -194,13 +207,19 @@ app.post('/api/register-id', async (req, res) => {
   const vbmSeal = createHmac('sha256', vbmSecret).update(message).digest('hex');
   const ninja_id = `did:ninja:${normalizedPublicKey.slice(0, 10)}`;
 
-  const { error: profileError } = await upsertProfileIdentity(email, normalizedPublicKey, ninja_id, vbmSeal);
-  if (profileError) {
-    console.error('Supabase profile update error:', profileError);
-    return res.status(500).json({ error: 'Failed to register ninja identity' });
-  }
+  try {
+    const { error: profileError } = await upsertProfileIdentity(email, normalizedPublicKey, ninja_id, vbmSeal);
+    if (profileError) {
+      console.error('Supabase profile update error:', profileError);
+      return res.status(500).json({ error: 'Failed to register ninja identity' });
+    }
 
-  res.json({ message: 'Ninja identity registered', ninja_id, vbm_seal: vbmSeal });
+    console.log('✅ Registration successful for:', email);
+    res.json({ message: 'Ninja identity registered', ninja_id, vbm_seal: vbmSeal });
+  } catch (error) {
+    console.error('Supabase Error:', error);
+    return res.status(500).json({ error: 'Database error during registration' });
+  }
 });
 
 // On Vercel, the server is run as a serverless function and should not call listen().
