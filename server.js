@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 
 // Store verification codes in Supabase table `verification_codes`
 
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'https://crystal-flow-canvas.lovable.app,https://lovable.app')
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || 'https://crystal-flow-canvas.lovable.app,https://lovable.app,https://05f59140-ddfd-4a75-8f66-2fe297885424.lovableproject.com')
   .split(',')
   .map(o => o.trim())
   .filter(Boolean);
