@@ -48,3 +48,11 @@ export async function upsertProfileIdentity(email, public_key, ninja_id, vbm_sea
       { onConflict: ['email'] }
     );
 }
+
+export async function getProfileByEmail(email) {
+  return supabase
+    .from('profiles')
+    .select('email')
+    .eq('email', email)
+    .maybeSingle();
+}

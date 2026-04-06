@@ -5,7 +5,7 @@ import path from 'path';
 import { createHmac } from 'crypto';
 import { fileURLToPath } from 'url';
 import { getSecret } from './envSecrets.js';
-import { upsertVerificationCode, getVerificationCode, deleteVerificationCode, upsertProfileIdentity } from './supabaseClient.js';
+import { upsertVerificationCode, getVerificationCode, deleteVerificationCode, upsertProfileIdentity, getProfileByEmail } from './supabaseClient.js';
 
 // Check Supabase configuration on startup
 const supabaseUrl = getSecret('SUPABASE_URL');
@@ -219,6 +219,27 @@ app.post('/api/register-id', async (req, res) => {
   } catch (error) {
     console.error('Supabase Error:', error);
     return res.status(500).json({ error: 'Database error during registration' });
+  }
+});
+
+app.post('/api/check-identity', async (req, res) => {
+  const { email } = req.body;
+  if (!email) {
+    return res.status(400).json({ error: 'Email required' });
+  }
+
+  try {
+    const { data, error } = await getProfileByEmail(email);
+
+    if (error) {
+      console.error('Supabase profile lookup error:', error);
+      return res.status(500).json({ error: 'Failed to check identity' });
+    }
+
+    res.json({ exists: !!data });
+  } catch (error) {
+    console.error('Supabase Error:', error);
+    res.status(500).json({ error: 'Database error during identity check' });
   }
 });
 
