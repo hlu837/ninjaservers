@@ -52,7 +52,15 @@ export async function upsertProfileIdentity(email, public_key, ninja_id, vbm_sea
 export async function getProfileByEmail(email) {
   return supabase
     .from('profiles')
-    .select('email')
+    .select('email, public_key, ninja_id, vbm_seal, created_at')
     .eq('email', email)
+    .maybeSingle();
+}
+
+export async function getProfileByDid(did) {
+  return supabase
+    .from('profiles')
+    .select('email, public_key, ninja_id, vbm_seal, created_at')
+    .eq('ninja_id', did)
     .maybeSingle();
 }

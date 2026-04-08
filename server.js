@@ -6,7 +6,7 @@ import { createHmac } from 'crypto';
 import { fileURLToPath } from 'url';
 import { Pool } from 'pg';
 import { getSecret } from './envSecrets.js';
-import { upsertVerificationCode, getVerificationCode, deleteVerificationCode, upsertProfileIdentity, getProfileByEmail } from './supabaseClient.js';
+import { upsertVerificationCode, getVerificationCode, deleteVerificationCode, upsertProfileIdentity, getProfileByEmail, getProfileByDid } from './supabaseClient.js';
 
 // Check Supabase configuration on startup
 const supabaseUrl = getSecret('SUPABASE_URL');
@@ -236,6 +236,38 @@ app.get('/api/logs/:email', async (req, res) => {
   }
 });
 
+app.get('/api/logs/:did', async (req, res) => {
+  if (!pool) {
+    return res.status(503).json({ error: 'Database connection not configured' });
+  }
+
+  const { did } = req.params;
+  if (!did) {
+    return res.status(400).json({ error: 'DID parameter required' });
+  }
+
+  try {
+    // First, get the email associated with the DID
+    const { data: profile, error: profileError } = await getProfileByDid(did);
+    if (profileError) {
+      console.error('Supabase profile lookup error:', profileError);
+      return res.status(500).json({ error: 'Failed to lookup profile' });
+    }
+    if (!profile) {
+      return res.status(404).json({ error: 'DID not found' });
+    }
+
+    const result = await pool.query(
+      'SELECT event, detail, created_at FROM network_logs WHERE email = $1 ORDER BY created_at DESC LIMIT 50',
+      [profile.email]
+    );
+    res.json({ logs: result.rows });
+  } catch (error) {
+    console.error('Network log query error:', error);
+    res.status(500).json({ error: 'Failed to retrieve logs' });
+  }
+});
+
 app.post('/api/register-id', async (req, res) => {
   console.log('--- START REGISTRATION ---');
   console.log('Payload:', req.body);
@@ -282,7 +314,12 @@ app.post('/api/register-id', async (req, res) => {
     }
 
     console.log('✅ Registration successful for:', email);
-    res.json({ message: 'Ninja identity registered', ninja_id, vbm_seal: vbmSeal });
+    res.json({
+      did: ninja_id,
+      created_at: new Date().toISOString(),
+      verificationMethod: 'Ed25519',
+      status: 'Active'
+    });
   } catch (error) {
     console.error('Supabase Error:', error);
     return res.status(500).json({ error: 'Database error during registration' });
@@ -303,7 +340,16 @@ app.post('/api/check-identity', async (req, res) => {
       return res.status(500).json({ error: 'Failed to check identity' });
     }
 
-    res.json({ exists: !!data });
+    if (data) {
+      res.json({
+        did: data.ninja_id,
+        created_at: data.created_at,
+        verificationMethod: 'Ed25519',
+        status: 'Active'
+      });
+    } else {
+      res.json({ exists: false });
+    }
   } catch (error) {
     console.error('Supabase Error:', error);
     res.status(500).json({ error: 'Database error during identity check' });
