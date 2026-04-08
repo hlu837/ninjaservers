@@ -4,6 +4,7 @@ import cors from 'cors';
 import path from 'path';
 import { createHmac } from 'crypto';
 import { fileURLToPath } from 'url';
+import { Pool } from 'pg';
 import { getSecret } from './envSecrets.js';
 import { upsertVerificationCode, getVerificationCode, deleteVerificationCode, upsertProfileIdentity, getProfileByEmail } from './supabaseClient.js';
 
@@ -19,6 +20,15 @@ if (!supabaseUrl || !supabaseServiceRoleKey) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+const databaseUrl = getSecret('DATABASE_URL') || process.env.DATABASE_URL;
+const pool = databaseUrl
+  ? new Pool({ connectionString: databaseUrl, ssl: { rejectUnauthorized: false } })
+  : null;
+
+if (!databaseUrl) {
+  console.warn('⚠️ DATABASE_URL is not configured. /api/log-action and /api/logs/:email endpoints will not work until the database connection is provided.');
+}
 
 // Store verification codes in Supabase table `verification_codes`
 
@@ -182,6 +192,50 @@ app.post('/api/verify-email', async (req, res) => {
   res.json({ message: 'Email verified successfully' });
 });
 
+app.post('/api/log-action', async (req, res) => {
+  if (!pool) {
+    return res.status(503).json({ error: 'Database connection not configured' });
+  }
+
+  const { email, event, detail } = req.body;
+  if (!email || !event) {
+    return res.status(400).json({ message: 'email and event required' });
+  }
+
+  try {
+    await pool.query(
+      'INSERT INTO network_logs (email, event, detail) VALUES ($1, $2, $3)',
+      [email, event, detail || null]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Network log insert error:', error);
+    res.status(500).json({ error: 'Failed to log action' });
+  }
+});
+
+app.get('/api/logs/:email', async (req, res) => {
+  if (!pool) {
+    return res.status(503).json({ error: 'Database connection not configured' });
+  }
+
+  const { email } = req.params;
+  if (!email) {
+    return res.status(400).json({ error: 'Email parameter required' });
+  }
+
+  try {
+    const result = await pool.query(
+      'SELECT event, detail, created_at FROM network_logs WHERE email = $1 ORDER BY created_at DESC LIMIT 50',
+      [email]
+    );
+    res.json({ logs: result.rows });
+  } catch (error) {
+    console.error('Network log query error:', error);
+    res.status(500).json({ error: 'Failed to retrieve logs' });
+  }
+});
+
 app.post('/api/register-id', async (req, res) => {
   console.log('--- START REGISTRATION ---');
   console.log('Payload:', req.body);
@@ -212,6 +266,19 @@ app.post('/api/register-id', async (req, res) => {
     if (profileError) {
       console.error('Supabase profile update error:', profileError);
       return res.status(500).json({ error: 'Failed to register ninja identity' });
+    }
+
+    if (pool) {
+      try {
+        await pool.query(
+          'INSERT INTO network_logs (email, event, detail) VALUES ($1, $2, $3)',
+          [email, 'IDENTITY_REGISTERED', 'Ninja ID created and anchored to network']
+        );
+      } catch (logError) {
+        console.error('Network log insert error after registration:', logError);
+      }
+    } else {
+      console.warn('Skipping identity registration log because DATABASE_URL is not configured.');
     }
 
     console.log('✅ Registration successful for:', email);
