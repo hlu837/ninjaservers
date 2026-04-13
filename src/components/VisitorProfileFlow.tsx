@@ -78,6 +78,8 @@ const VisitorProfileFlow = ({ isOpen, onClose }: VisitorProfileFlowProps) => {
   const [showRecoveryPhrase, setShowRecoveryPhrase] = useState(false);
   const [loadingIdentity, setLoadingIdentity] = useState(false);
   const [session, setSession] = useState<{ email: string; startedAt: string; did?: string } | null>(null);
+  const [serverIdentityExists, setServerIdentityExists] = useState(false);
+  const [serverPublicKey, setServerPublicKey] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen) {
@@ -141,7 +143,37 @@ const VisitorProfileFlow = ({ isOpen, onClose }: VisitorProfileFlowProps) => {
       };
       saveSession(newSession);
       setSession(newSession);
-      setStep(identity ? 'profile' : 'identity');
+
+      // Check backend for existing identity for this email. If one exists,
+      // force the user to restore instead of generating a new identity.
+      try {
+        const resp = await fetch(`${API_BASE}/api/check-identity`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: fullEmail })
+        });
+        if (resp.ok) {
+          const body = await resp.json();
+          if (body.exists) {
+            setServerIdentityExists(true);
+            setServerPublicKey(body.public_key || null);
+            setStep('identity');
+          } else {
+            setServerIdentityExists(false);
+            setServerPublicKey(null);
+            setStep(identity ? 'profile' : 'identity');
+          }
+        } else {
+          // If the check fails, fall back to the previous behavior
+          setServerIdentityExists(false);
+          setServerPublicKey(null);
+          setStep(identity ? 'profile' : 'identity');
+        }
+      } catch (err) {
+        setServerIdentityExists(false);
+        setServerPublicKey(null);
+        setStep(identity ? 'profile' : 'identity');
+      }
     } catch (err: any) {
       setError(err.message || 'Invalid verification code');
     } finally {
@@ -157,6 +189,12 @@ const VisitorProfileFlow = ({ isOpen, onClose }: VisitorProfileFlowProps) => {
       const existing = loadIdentity();
       if (existing) {
         setError('An identity already exists locally. Delete it first to generate a new one.');
+        setLoadingIdentity(false);
+        return;
+      }
+      // Prevent generating a new identity if one exists on the server for this email
+      if (serverIdentityExists) {
+        setError('An identity is already registered for this email. Use recovery instead.');
         setLoadingIdentity(false);
         return;
       }
@@ -186,6 +224,12 @@ const VisitorProfileFlow = ({ isOpen, onClose }: VisitorProfileFlowProps) => {
     setError('');
     try {
       const restoredIdentity = await regenerateIdentityFromPhrase(recoveryPhrase);
+      // If the server already has an identity, ensure the recovered public key matches it
+      if (serverIdentityExists && serverPublicKey && restoredIdentity.publicKey !== serverPublicKey) {
+        setError('Recovery phrase does not match the registered identity for this email');
+        setLoadingIdentity(false);
+        return;
+      }
       const savedIdentity = {
         ...restoredIdentity,
         createdAt: new Date().toISOString(),
